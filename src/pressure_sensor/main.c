@@ -36,13 +36,17 @@
 
 #include "main.h"
 #include "board.h"
-
-//#include "lwipopts.h"
-//#include "lwipthread.h"
+#include "data_udp.h"
+#include <lwip/ip_addr.h>
+#include "lwipopts.h"
+#include "lwipthread.h"
+#include "lwip/opt.h"
+#include "lwip/arch.h"
+#include "lwip/api.h"
+#include "lwip/ip_addr.h"
 
 //BaseSequentialStream *chp =  (BaseSequentialStream *)&SDU1;
 
-static Mutex mtx;
 static const ShellCommand commands[] = {
 		{"mem", cmd_mem},
 		{"threads", cmd_threads},
@@ -164,29 +168,60 @@ static msg_t Thread_mpl3115a2_int(void* arg) {
 	return -1;
 }
 */
-static WORKING_AREA(waThread_mpl3115a2, 256);
+static WORKING_AREA(waThread_mpl3115a2, 512);
 /*! \brief MPU9150 thread
  */
-static msg_t Thread_mpl3115a2(void *arg) {
-	(void)arg;
+static msg_t Thread_mpl3115a2(void *p) {
 	BaseSequentialStream *chp =  (BaseSequentialStream *)&SDU1;
-	//float altitude = 5.0;
 	chRegSetThreadName("mpl3115a2");
-	
+	//network goodies
+	struct     netconn    *conn;
+   char                   msg[DATA_UDP_MSG_SIZE] ;
+   struct     netbuf     *buf;
+   char*                  data;
+   struct ip_addr addr;
+   addr.addr = PSAS_UDP_TARGET;
+   conn       = netconn_new( NETCONN_UDP );
+   netconn_bind(conn, NULL, 35001 ); //local port
+	netconn_connect(conn, &addr , DATA_UDP_REPLY_PORT );
+   //buf     =  netbuf_new();
+   //data    =  netbuf_alloc(buf, sizeof(msg));
+	uint16_t temp;
+	uint32_t press;
 	while (TRUE) {
-		//chEvtDispatch(evhndl_newdata, chEvtWaitOneTimeout((eventmask_t)1, US2ST(50)));
-		//chprintf(chp,"This is the pressure sensor thread talking\n");
-		//altitude = mpl3115a2_get_altitude(mpl3115a2_driver.i2c_instance);
-		chMtxLock(&mtx);
 		mpl3115a2_get_temperature(mpl3115a2_driver.i2c_instance);
 		//chprintf(chp,"High order temperature bits: %d.  Low order temperature bits %d\r\n", mpl3115a2_driver.ho_temp, mpl3115a2_driver.lo_temp);
-		chMtxUnlock();
-		chprintf(chp,"High order temperature bits: %d.  Low order temperature bits %d\r\n", mpl3115a2_driver.ho_temp, mpl3115a2_driver.lo_temp);
-		chMtxLock(&mtx);
+		//chprintf(chp,"High order temperature bits: %d.  Low order temperature bits %d\r\n", mpl3115a2_driver.ho_temp, mpl3115a2_driver.lo_temp);
+		//enabling floating point for sprintf causes board to crash
+		//putting the bytes on the wire as-is for now.
+		temp = ( mpl3115a2_driver.ho_temp << 4 | mpl3115a2_driver.lo_temp) & BIT12_MASK;
+		if (mpl3115a2_driver.i2c_errors) {
+			sprintf(msg, "TEMP ERROR");
+		} else {
+			sprintf(msg, "TEMP %d %d", mpl3115a2_driver.ho_temp, mpl3115a2_driver.lo_temp);
+		}
+		netconn_connect(conn, &addr , DATA_UDP_REPLY_PORT );
+		buf     =  netbuf_new();
+   	data    =  netbuf_alloc(buf, sizeof(msg));
+		memcpy (data, msg, sizeof (msg));
+   	netconn_send(conn, buf);
+   	netbuf_delete(buf); // De-allocate packet buffer
+		netconn_disconnect(conn);
 		mpl3115a2_get_bar(mpl3115a2_driver.i2c_instance);
-		chMtxUnlock();
-		chprintf(chp, "High order pressure bits: %d.  Center pressure bits: %d.  Low order pressure bits: %d\r\n",  mpl3115a2_driver.bar_msb,  mpl3115a2_driver.bar_csb,  mpl3115a2_driver.bar_lsb);
-		chThdSleepMilliseconds(1000);
+		press = ( ( mpl3115a2_driver.bar_msb << 16 ) | mpl3115a2_driver.bar_csb << 8 | mpl3115a2_driver.bar_lsb) & BIT20_MASK;
+		if (mpl3115a2_driver.i2c_errors) {
+			sprintf(msg, "BAR ERROR");
+		} else {
+			sprintf(msg, "BAR %d", press);
+		}
+		netconn_connect(conn, &addr , DATA_UDP_REPLY_PORT );
+		buf     =  netbuf_new();
+   	data    =  netbuf_alloc(buf, sizeof(msg));
+		memcpy (data, msg, sizeof (msg));
+   	netconn_send(conn, buf);
+   	netbuf_delete(buf); // De-allocate packet buffer
+		netconn_disconnect(conn);
+		chThdSleepMilliseconds(10);
 	}
 	return -1;
 }
@@ -244,7 +279,8 @@ int main(void) {
 			extdetail_WKUP_button_handler
 	};
 	struct EventListener     el0;
-
+	  /*lwip options data structure*/
+   struct lwipthread_opts   ip_opts;
 	/*
 	 * System initializations.
 	 * - HAL initialization, this also initializes the configured device drivers
@@ -252,12 +288,21 @@ int main(void) {
 	 * - Kernel initialization, the main() function becomes a thread and the
 	 *   RTOS is active.
 	 */
-	 chMtxInit(&mtx);
 	halInit();
 	chSysInit();
 
 	extdetail_init();
-
+  /*configure ethernet, ip stuff*/
+   static       uint8_t      macAddress[6]    =     {0xC2, 0xAF, 0x51, 0x03, 0xCF, 0x46};
+   struct ip_addr ip, gateway, netmask;
+   IP4_ADDR(&ip,      10, 0, 0, 2);
+   IP4_ADDR(&gateway, 10, 0, 0, 254);
+   IP4_ADDR(&netmask, 255, 255, 255, 0);
+   ip_opts.address    = ip.addr;
+   ip_opts.netmask    = netmask.addr;
+   ip_opts.gateway    = gateway.addr;
+   ip_opts.macaddress = macAddress;
+	
 
 	/*
 	 * SPI1 I/O pins setup.
@@ -334,6 +379,7 @@ int main(void) {
 
 	chThdCreateStatic(waThread_blinker,      sizeof(waThread_blinker),      NORMALPRIO, Thread_blinker,      NULL);
 	chThdCreateStatic(waThread_indwatchdog,  sizeof(waThread_indwatchdog),  NORMALPRIO, Thread_indwatchdog,  NULL);
+	chThdCreateStatic(wa_lwip_thread, LWIP_THREAD_STACK_SIZE, NORMALPRIO + 2, lwip_thread, &ip_opts);
 	chThdCreateStatic(waThread_mpl3115a2,      sizeof(waThread_mpl3115a2),      NORMALPRIO, Thread_mpl3115a2,      NULL);
 
 	chEvtRegister(&extdetail_wkup_event, &el0, 0);

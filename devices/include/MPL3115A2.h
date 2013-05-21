@@ -31,7 +31,8 @@ typedef     uint8_t                               mpl3115a2_reg_addr;
 
 #define     MPL3115A2_MAX_TX_BUFFER                 50
 #define     MPL3115A2_MAX_RX_BUFFER                 50
-
+#define     BIT20_MASK										 0x0FFFFF
+#define		BIT12_MASK										 0x000FFF
 /*! register 55 INT pin/Bypass */
 #define     MPL3115A2_CLKOUT_EN                     ((mpl3115a2_reg_data)(1<<0))
 #define     MPL3115A2_I2C_BYPASS                    ((mpl3115a2_reg_data)(1<<1))

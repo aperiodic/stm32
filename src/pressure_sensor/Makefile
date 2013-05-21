@@ -96,7 +96,7 @@ CSRC = $(PORTSRC) \
        cmddetail.c \
        extdetail.c \
        usbdetail.c \
-		 main.c udp/udp_pwm.c
+		 main.c data_udp/data_udp.c
 
 # C++ sources that can be compiled in ARM or THUMB mode depending on the global
 # setting.
@@ -130,7 +130,7 @@ INCDIR = $(PORTINC) $(KERNINC) $(TESTINC) \
          $(CHIBIOS)/os/various \
          $(PSAS_COMMON) $(LWINC)\
          $(PSAS_DEV_SRC)/include \
-
+			./data_udp
 #
 # Project, sources and paths
 ##############################################################################

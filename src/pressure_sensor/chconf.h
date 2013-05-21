@@ -524,6 +524,10 @@
 }
 #endif
 
+#if !defined(CHPRINTF_USE_FLOAT) || defined(__DOXYGEN__)
+#define CHPRINTF_USE_FLOAT   FALSE
+#endif
+
 /** @} */
 
 /*===========================================================================*/
